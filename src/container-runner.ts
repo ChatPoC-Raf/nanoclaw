@@ -20,6 +20,7 @@ import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
   CONTAINER_RUNTIME_BIN,
+  connectToNetworks,
   hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
@@ -124,6 +125,8 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  // Ensure writable by container's non-root user (node, uid 1000)
+  fs.chmodSync(groupSessionsDir, 0o777);
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
@@ -171,6 +174,11 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  // Ensure IPC directories are writable by container's non-root user (node, uid 1000)
+  for (const sub of ['messages', 'tasks', 'input']) {
+    fs.chmodSync(path.join(groupIpcDir, sub), 0o777);
+  }
+  fs.chmodSync(groupIpcDir, 0o777);
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -247,6 +255,11 @@ async function buildContainerArgs(
       'OneCLI gateway not reachable — container will have no credentials',
     );
   }
+
+  // Bypass proxy for local/private network addresses so agent-browser
+  // can reach services on the Docker bridge (e.g. frontend at 172.17.0.x)
+  args.push('-e', 'NO_PROXY=localhost,127.0.0.1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,host.docker.internal');
+  args.push('-e', 'no_proxy=localhost,127.0.0.1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16,host.docker.internal');
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
@@ -330,6 +343,12 @@ export async function runContainerAgent(
     });
 
     onProcess(container, containerName);
+
+    // Connect to additional Docker networks so the agent can reach
+    // services on other compose stacks (e.g. cine-cost-copilot frontend)
+    if (group.containerConfig?.networks?.length) {
+      connectToNetworks(containerName, group.containerConfig.networks);
+    }
 
     let stdout = '';
     let stderr = '';

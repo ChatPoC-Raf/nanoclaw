@@ -145,8 +145,19 @@ async function connectSocket(
       console.log('  Credentials saved to store/auth/');
       console.log('  You can now start the NanoClaw service.\n');
 
-      // Give it a moment to save credentials, then exit
-      setTimeout(() => process.exit(0), 1000);
+      // Wait for creds.update to fire with registered=true before exiting
+      const waitForRegistered = () => {
+        try {
+          const creds = JSON.parse(fs.readFileSync(path.join(AUTH_DIR, 'creds.json'), 'utf-8'));
+          if (creds.registered) {
+            process.exit(0);
+          }
+        } catch {}
+        setTimeout(waitForRegistered, 500);
+      };
+      // Start checking after a short delay, with a hard timeout
+      setTimeout(waitForRegistered, 1000);
+      setTimeout(() => process.exit(0), 10000); // exit after 10s max
     }
   });
 

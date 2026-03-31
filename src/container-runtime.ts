@@ -27,6 +27,31 @@ export function readonlyMountArgs(
   return ['-v', `${hostPath}:${containerPath}:ro`];
 }
 
+/** Connect a running container to additional Docker networks. */
+export function connectToNetworks(
+  containerName: string,
+  networks: string[],
+): void {
+  for (const network of networks) {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(network)) {
+      logger.warn({ network }, 'Skipping invalid network name');
+      continue;
+    }
+    try {
+      execSync(
+        `${CONTAINER_RUNTIME_BIN} network connect ${network} ${containerName}`,
+        { stdio: 'pipe' },
+      );
+      logger.info({ containerName, network }, 'Connected container to network');
+    } catch (err) {
+      logger.warn(
+        { containerName, network, err },
+        'Failed to connect container to network',
+      );
+    }
+  }
+}
+
 /** Stop a container by name. Uses execFileSync to avoid shell injection. */
 export function stopContainer(name: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
